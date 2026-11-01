@@ -6,11 +6,11 @@
 
 ### [ChatGPT Prompt Navigator](chatgpt-prompt-navigator/)
 
-<text>为长 ChatGPT 对话提供“我的提问”目录和快速跳转能力的本地 Chrome / Edge 扩展。</text>
+为长 ChatGPT 对话提供“我的提问”目录和快速跳转能力的本地 Chrome / Edge 扩展。
 
 - **当前版本：** 1.4.0
 - **技术栈：** Chrome Extension Manifest V3、JavaScript、CSS
-- **支持页面：** \`chatgpt.com\`、\`chat.openai.com\`
+- **支持页面：** `chatgpt.com`、`chat.openai.com`
 - **核心能力：**
   - 自动提取当前会话中的用户提问，生成侧边目录。
   - 点击目录项即可定位到对应提问。
@@ -23,17 +23,17 @@
 
 | 快捷键 | 操作 |
 | --- | --- |
-| \`Alt + ↑\` | 上一条我的提问 |
-| \`Alt + ↓\` | 下一条我的提问 |
-| \`Alt + Home\` | 第一条我的提问 |
-| \`Alt + End\` | 最后一条我的提问 |
+| `Alt + ↑` | 上一条我的提问 |
+| `Alt + ↓` | 下一条我的提问 |
+| `Alt + Home` | 第一条我的提问 |
+| `Alt + End` | 最后一条我的提问 |
 
 **安装**
 
 1. 下载或克隆本仓库。
-2. 打开 Chrome 的 \`chrome://extensions/\` 或 Edge 的 \`edge://extensions/\`。
+2. 打开 Chrome 的 `chrome://extensions/` 或 Edge 的 `edge://extensions/`。
 3. 开启“开发者模式”。
-4. 点击“加载解压缩的扩展”，选择仓库中的 \`chatgpt-prompt-navigator\` 文件夹。
+4. 点击“加载解压缩的扩展”，选择仓库中的 `chatgpt-prompt-navigator` 文件夹。
 5. 打开或刷新 ChatGPT 页面。
 
 详细功能、隐私说明、兼容性说明和更新记录请阅读项目自己的 [README](chatgpt-prompt-navigator/README.md)。
@@ -44,7 +44,7 @@ ChatGPT Prompt Navigator 不包含遥测、第三方请求或远程脚本。为�
 
 ## 仓库结构
 
-\`\`\`text
+```text
 Yuhang/
 ├── README.md
 └── chatgpt-prompt-navigator/
@@ -52,4 +52,4 @@ Yuhang/
     ├── manifest.json
     ├── content.js
     └── styles.css
-\`\`\`
+```
