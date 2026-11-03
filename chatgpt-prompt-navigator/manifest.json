@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Prompt Navigator",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Stable prompt index and keyboard navigation for virtualized long ChatGPT conversations.",
   "content_scripts": [
     {
