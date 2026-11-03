@@ -299,18 +299,40 @@
           style.visibility === "collapse") {
         return false;
       }
+      // display: contents has no box, but its descendants can be visible.
+      // A target with no box is not itself safe for scrollIntoView().
+      if (style.display === "contents") {
+        if (node === element) return false;
+        continue;
+      }
       const rect = node.getBoundingClientRect();
       if (rect.width <= 1 || rect.height <= 1) return false;
     }
     return true;
   }
 
+  function positionableAnchor(element) {
+    if (!element || !element.isConnected) return null;
+    if (elementHasLayout(element)) return element;
+    if (getComputedStyle(element).display !== "contents") return null;
+
+    // Only a visible descendant of this same user-message unit may substitute
+    // for a display: contents wrapper with no scrollable box.
+    const selector =
+      '[data-user-message-bubble="true"], [data-message-author-role="user"], ' +
+      '.user-message-bubble-color, .text-size-chat, .whitespace-pre-wrap';
+    for (const child of element.querySelectorAll(selector)) {
+      if (elementHasLayout(child)) return child;
+    }
+    return null;
+  }
+
   function findNewUserUnitByMessageId(messageId, scroller) {
     if (!messageId || !scroller) return null;
     for (const unit of scroller.querySelectorAll(NEW_USER_UNIT_SELECTOR)) {
-      if (messageIdsFromElement(unit).includes(messageId) && elementHasLayout(unit)) {
-        return unit;
-      }
+      if (!messageIdsFromElement(unit).includes(messageId)) continue;
+      const anchor = positionableAnchor(unit);
+      if (anchor) return anchor;
     }
     return null;
   }
@@ -318,9 +340,9 @@
   function findTurnByMessageId(messageId, scroller) {
     if (!messageId || !scroller) return null;
     for (const turn of scroller.querySelectorAll(NEW_TURN_SELECTOR)) {
-      if (turn.getAttribute("data-turn-key") === messageId && elementHasLayout(turn)) {
-        return turn;
-      }
+      if (turn.getAttribute("data-turn-key") !== messageId) continue;
+      const anchor = positionableAnchor(turn);
+      if (anchor) return anchor;
     }
     return null;
   }
@@ -328,10 +350,9 @@
   function findLegacyMessageElement(messageId, scroller) {
     if (!messageId || !scroller) return null;
     for (const element of scroller.querySelectorAll("[data-message-id]")) {
-      if (element.getAttribute("data-message-id") === messageId &&
-          elementHasLayout(element)) {
-        return element;
-      }
+      if (element.getAttribute("data-message-id") !== messageId) continue;
+      const anchor = positionableAnchor(element);
+      if (anchor) return anchor;
     }
     return null;
   }
@@ -383,20 +404,23 @@
     const entries = [];
     const seen = new Set();
     for (const unit of scroller.querySelectorAll(NEW_USER_UNIT_SELECTOR)) {
-      if (!elementHasLayout(unit)) continue;
+      const anchor = positionableAnchor(unit);
+      if (!anchor) continue;
       for (const id of messageIdsFromElement(unit)) {
         const index = indexById.get(id);
         if (index === undefined || seen.has(index)) continue;
         seen.add(index);
-        entries.push({ index, element: unit });
+        entries.push({ index, element: anchor });
         break;
       }
     }
     for (const turn of scroller.querySelectorAll(NEW_TURN_SELECTOR)) {
       const index = indexById.get(turn.getAttribute("data-turn-key") || "");
-      if (index === undefined || seen.has(index) || !elementHasLayout(turn)) continue;
+      if (index === undefined || seen.has(index)) continue;
+      const anchor = positionableAnchor(turn);
+      if (!anchor) continue;
       seen.add(index);
-      entries.push({ index, element: turn });
+      entries.push({ index, element: anchor });
     }
     entries.sort((a, b) => a.index - b.index);
     return entries;
@@ -726,14 +750,14 @@
             const index = indexById.get(id);
             if (index === undefined || matches.has(index)) continue;
             matches.add(index);
-            if (elementHasLayout(unit)) visibleMatches += 1;
+            if (positionableAnchor(unit)) visibleMatches += 1;
           }
         }
         for (const turn of turns) {
           const index = indexById.get(turn.getAttribute("data-turn-key") || "");
           if (index === undefined || matches.has(index)) continue;
           matches.add(index);
-          if (elementHasLayout(turn)) visibleMatches += 1;
+          if (positionableAnchor(turn)) visibleMatches += 1;
         }
         return {
           scroller,
