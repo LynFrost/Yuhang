@@ -30,6 +30,10 @@
     navigationActive: false,
     navigationTargetIndex: -1,
     navigationOriginIndex: -1,
+    navigationFeedback: "",
+    navigationReason: "",
+    navigationRecoveryAttempts: 0,
+    navigationLocatedTop: null,
     pendingRefresh: false
   };
 
@@ -283,105 +287,103 @@
     return map;
   }
 
-  function findNewUserUnitByMessageId(messageId) {
-    if (!messageId) return null;
-    const root = document.querySelector("main") || document;
-
-    for (const unit of root.querySelectorAll(NEW_USER_UNIT_SELECTOR)) {
-      if (messageIdsFromElement(unit).includes(messageId)) return unit;
+  // Hidden conversation nodes are not usable scroll anchors, even with matching IDs.
+  function elementHasLayout(element) {
+    if (!element || !element.isConnected) return false;
+    for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+      if (node.hidden || node.inert || node.getAttribute("aria-hidden") === "true") {
+        return false;
+      }
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" ||
+          style.visibility === "collapse") {
+        return false;
+      }
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1) return false;
     }
+    return true;
+  }
 
+  function findNewUserUnitByMessageId(messageId, scroller) {
+    if (!messageId || !scroller) return null;
+    for (const unit of scroller.querySelectorAll(NEW_USER_UNIT_SELECTOR)) {
+      if (messageIdsFromElement(unit).includes(messageId) && elementHasLayout(unit)) {
+        return unit;
+      }
+    }
     return null;
   }
 
-  function findTurnByMessageId(messageId) {
-    if (!messageId) return null;
-    const root = document.querySelector("main") || document;
-
-    for (const turn of root.querySelectorAll(NEW_TURN_SELECTOR)) {
-      if ((turn.getAttribute("data-turn-key") || "") !== messageId) continue;
-
-      const rect = turn.getBoundingClientRect();
-      if (rect.height > 1 || turn.scrollHeight > 1) return turn;
+  function findTurnByMessageId(messageId, scroller) {
+    if (!messageId || !scroller) return null;
+    for (const turn of scroller.querySelectorAll(NEW_TURN_SELECTOR)) {
+      if (turn.getAttribute("data-turn-key") === messageId && elementHasLayout(turn)) {
+        return turn;
+      }
     }
-
     return null;
   }
 
-  function findLegacyMessageElement(messageId) {
-    if (!messageId) return null;
-    const root = document.querySelector("main") || document;
-
-    for (const element of root.querySelectorAll("[data-message-id]")) {
-      if ((element.getAttribute("data-message-id") || "") === messageId) {
+  function findLegacyMessageElement(messageId, scroller) {
+    if (!messageId || !scroller) return null;
+    for (const element of scroller.querySelectorAll("[data-message-id]")) {
+      if (element.getAttribute("data-message-id") === messageId &&
+          elementHasLayout(element)) {
         return element;
       }
     }
-
     return null;
   }
 
-  function findTextFallbackElement(prompt) {
+  function findTextFallbackElement(prompt, scroller) {
+    if (!scroller) return null;
     const needle = textMatchNeedle(prompt && prompt.text);
     if (needle.length < 6) return null;
-
-    const root = document.querySelector("main") || document.body;
-    if (!root) return null;
-
     const selector =
       '[data-user-message-bubble="true"], .text-size-chat, .whitespace-pre-wrap';
-
     let best = null;
     let bestScore = Infinity;
-
-    for (const element of root.querySelectorAll(selector)) {
-      if (element.closest("#" + ROOT_ID)) continue;
-
-      const rect = element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
-
+    for (const element of scroller.querySelectorAll(selector)) {
+      if (!elementHasLayout(element)) continue;
+      const userAncestor = element.closest(
+        '[data-chatgpt-search-unit-key$=":user"], [data-message-author-role="user"], [data-user-message-bubble="true"]'
+      );
+      if (!userAncestor) continue;
       const text = normalizeText(element.innerText || element.textContent);
       if (!text) continue;
-
       const exact = text === prompt.text;
       const starts = text.startsWith(needle);
       const contains = text.includes(needle);
       if (!exact && !starts && !contains) continue;
-
-      const score =
-        (exact ? 0 : starts ? 100 : 300) +
+      const score = (exact ? 0 : starts ? 100 : 300) +
         Math.abs(text.length - prompt.text.length);
-
       if (score < bestScore) {
         best = element;
         bestScore = score;
       }
     }
-
     return best;
   }
 
-  function resolvePromptElement(prompt) {
-    if (!prompt) return null;
-
+  function resolvePromptElement(prompt, scroller = primaryScrollContainer()) {
+    if (!prompt || !scroller) return null;
     return (
-      findNewUserUnitByMessageId(prompt.messageId) ||
-      findTurnByMessageId(prompt.messageId) ||
-      findLegacyMessageElement(prompt.messageId) ||
-      findTextFallbackElement(prompt)
+      findNewUserUnitByMessageId(prompt.messageId, scroller) ||
+      findTurnByMessageId(prompt.messageId, scroller) ||
+      findLegacyMessageElement(prompt.messageId, scroller) ||
+      findTextFallbackElement(prompt, scroller)
     );
   }
 
-  function currentMountedPromptEntries() {
+  // "当前" counts only actual usable anchors in the active conversation.
+  function currentMountedPromptEntries(scroller = primaryScrollContainer()) {
+    if (!scroller) return [];
     const indexById = currentPromptIndexByMessageId();
-    const root = document.querySelector("main") || document;
     const entries = [];
     const seen = new Set();
-
-    for (const unit of root.querySelectorAll(NEW_USER_UNIT_SELECTOR)) {
-      const rect = unit.getBoundingClientRect();
-      if (rect.height <= 0) continue;
-
+    for (const unit of scroller.querySelectorAll(NEW_USER_UNIT_SELECTOR)) {
+      if (!elementHasLayout(unit)) continue;
       for (const id of messageIdsFromElement(unit)) {
         const index = indexById.get(id);
         if (index === undefined || seen.has(index)) continue;
@@ -390,19 +392,12 @@
         break;
       }
     }
-
-    for (const turn of root.querySelectorAll(NEW_TURN_SELECTOR)) {
-      const id = turn.getAttribute("data-turn-key") || "";
-      const index = indexById.get(id);
-      if (index === undefined || seen.has(index)) continue;
-
-      const rect = turn.getBoundingClientRect();
-      if (rect.height <= 0) continue;
-
+    for (const turn of scroller.querySelectorAll(NEW_TURN_SELECTOR)) {
+      const index = indexById.get(turn.getAttribute("data-turn-key") || "");
+      if (index === undefined || seen.has(index) || !elementHasLayout(turn)) continue;
       seen.add(index);
       entries.push({ index, element: turn });
     }
-
     entries.sort((a, b) => a.index - b.index);
     return entries;
   }
@@ -412,19 +407,19 @@
     if (!root) return;
     const status = root.querySelector(".cgpt-nav-status");
     if (!status) return;
-
     const total = state.prompts.length;
     const mounted = currentMountedPromptEntries().length;
-
+    const suffix = state.navigationFeedback ? " · " + state.navigationFeedback : "";
+    const note = state.navigationReason ? "；" + state.navigationReason : "";
     if (state.apiKnowledge && Array.isArray(state.apiKnowledge.prompts)) {
-      status.textContent = total + "条 · 当前" + mounted + "/" + total;
+      status.textContent = total + "条 · 当前" + mounted + "/" + total + suffix;
       status.title =
-        "目录来自完整会话数据；“当前”表示此刻已被 ChatGPT 实际渲染、可直接定位的用户提问数量。";
+        "目录来自完整会话数据；“当前”仅表示活动会话中可直接定位的锚点数量。" +
+        "0 个锚点时仍可在有效滚动容器内尝试渐进寻找。" + note;
       return;
     }
-
-    status.textContent = state.apiStatus;
-    status.title = state.apiStatusTitle || state.apiStatus;
+    status.textContent = state.apiStatus + suffix;
+    status.title = (state.apiStatusTitle || state.apiStatus) + note;
   }
 
   async function prefetchConversation(force = false) {
@@ -702,24 +697,90 @@
     updateActiveItem();
   }
 
-  function primaryScrollContainer() {
-    return (
-      document.querySelector(CHAT_SCROLL_SELECTOR) ||
-      document.scrollingElement ||
-      document.documentElement
-    );
+  function scrollMetrics(scroller) {
+    if (!scroller) return null;
+    const range = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const reverse = getComputedStyle(scroller).flexDirection === "column-reverse";
+    return {
+      range,
+      top: scroller.scrollTop,
+      oldest: reverse ? -range : 0,
+      newest: reverse ? 0 : range,
+      min: reverse ? -range : 0,
+      max: reverse ? 0 : range
+    };
   }
 
-  function scrollElementIntoView(element) {
-    if (!element || !element.isConnected) return false;
+  // Never use DOM order, a hidden container, or scrollHeight alone.
+  function primaryScrollContainer() {
+    const indexById = currentPromptIndexByMessageId();
+    const candidates = [...document.querySelectorAll(CHAT_SCROLL_SELECTOR)]
+      .filter(elementHasLayout)
+      .map((scroller) => {
+        const matches = new Set();
+        let visibleMatches = 0;
+        const units = scroller.querySelectorAll(NEW_USER_UNIT_SELECTOR);
+        const turns = scroller.querySelectorAll(NEW_TURN_SELECTOR);
+        for (const unit of units) {
+          for (const id of messageIdsFromElement(unit)) {
+            const index = indexById.get(id);
+            if (index === undefined || matches.has(index)) continue;
+            matches.add(index);
+            if (elementHasLayout(unit)) visibleMatches += 1;
+          }
+        }
+        for (const turn of turns) {
+          const index = indexById.get(turn.getAttribute("data-turn-key") || "");
+          if (index === undefined || matches.has(index)) continue;
+          matches.add(index);
+          if (elementHasLayout(turn)) visibleMatches += 1;
+        }
+        return {
+          scroller,
+          matched: matches.size,
+          visibleMatches,
+          hasUserMarkers: units.length > 0 || turns.length > 0 ||
+            !!scroller.querySelector("[data-message-author-role='user']"),
+          inMain: !!scroller.closest("main"),
+          hasRange: scrollMetrics(scroller).range > 2
+        };
+      });
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0].scroller;
+    const maxMatched = Math.max(...candidates.map((item) => item.matched));
+    let eligible = maxMatched > 0
+      ? candidates.filter((item) => item.matched === maxMatched)
+      : candidates.filter((item) => item.inMain && item.hasUserMarkers);
+    if (eligible.length === 1) return eligible[0].scroller;
+    if (maxMatched > 0) {
+      const maxVisible = Math.max(...eligible.map((item) => item.visibleMatches));
+      if (maxVisible > 0) {
+        eligible = eligible.filter((item) => item.visibleMatches === maxVisible);
+        if (eligible.length === 1) return eligible[0].scroller;
+      }
+    }
+    // For ID-free markup require a uniquely active, message-bearing main.
+    if (maxMatched === 0) {
+      const scrollable = eligible.filter((item) => item.hasRange);
+      if (scrollable.length === 1) return scrollable[0].scroller;
+    }
+    return null;
+  }
 
+  function scrollElementIntoView(element, scroller) {
+    if (!scroller || !element || !scroller.contains(element) ||
+        !elementHasLayout(element)) return false;
     element.scrollIntoView({
-      behavior: "auto",
-      block: "start",
-      inline: "nearest"
+      behavior: "auto", block: "start", inline: "nearest"
     });
-
     return true;
+  }
+
+  function anchorIsInViewport(element, scroller) {
+    if (!element || !scroller || !elementHasLayout(element)) return false;
+    const rect = element.getBoundingClientRect();
+    const view = scroller.getBoundingClientRect();
+    return rect.bottom >= view.top - 2 && rect.top <= view.bottom + 2;
   }
 
   function clearNavigationTimer() {
@@ -729,25 +790,41 @@
     }
   }
 
-  function cancelNavigation() {
+  function cancelNavigation(reason = "") {
+    const wasActive = state.navigationActive;
     clearNavigationTimer();
     state.navigationSeq += 1;
     state.navigationActive = false;
     state.navigationTargetIndex = -1;
     state.navigationOriginIndex = -1;
+    state.navigationRecoveryAttempts = 0;
+    if (wasActive) {
+      state.selectedIndex = -1;
+      state.navigationFeedback = reason ? "已取消" : "";
+      state.navigationReason = reason;
+    }
   }
 
-  function finishNavigation(seq) {
+  function finishNavigation(seq, success = false, reason = "") {
     if (seq !== state.navigationSeq) return;
-
     clearNavigationTimer();
+    if (success) {
+      state.selectedIndex = state.navigationTargetIndex;
+      const locatedScroller = primaryScrollContainer();
+      state.navigationLocatedTop = locatedScroller ? locatedScroller.scrollTop : null;
+      state.navigationFeedback = "已定位";
+      state.navigationReason = "";
+    } else {
+      state.selectedIndex = -1;
+      state.navigationLocatedTop = null;
+      state.navigationFeedback = "无法定位";
+      state.navigationReason = reason || "目标尚未成为可定位的活动消息节点";
+    }
     state.navigationActive = false;
     state.navigationTargetIndex = -1;
     state.navigationOriginIndex = -1;
-
     updateStatusUi();
     updateActiveItem();
-
     if (state.pendingRefresh) {
       state.pendingRefresh = false;
       scheduleRefresh(80);
@@ -765,38 +842,13 @@
   }
 
   function scrollOneViewport(scroller, direction, scale = 0.86) {
-    if (!scroller || !direction) return false;
-
-    if (
-      scroller === document.scrollingElement ||
-      scroller === document.documentElement ||
-      scroller === document.body
-    ) {
-      const before = window.scrollY || document.documentElement.scrollTop || 0;
-      const maxTop = Math.max(
-        0,
-        document.documentElement.scrollHeight - window.innerHeight
-      );
-      const step = Math.max(240, window.innerHeight * scale);
-      const next = Math.max(0, Math.min(maxTop, before + direction * step));
-
-      if (Math.abs(next - before) < 2) return false;
-      window.scrollTo({ top: next, behavior: "auto" });
-      return true;
-    }
-
-    const before = scroller.scrollTop;
-    const maxDistance = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    const reverse = getComputedStyle(scroller).flexDirection === "column-reverse";
-    const minTop = reverse ? -maxDistance : 0;
-    const maxTop = reverse ? 0 : maxDistance;
+    const metrics = scrollMetrics(scroller);
+    if (!metrics || !direction || metrics.range <= 2) return false;
     const step = Math.max(240, scroller.clientHeight * scale);
     const next = Math.max(
-      minTop,
-      Math.min(maxTop, before + direction * step)
+      metrics.min, Math.min(metrics.max, metrics.top + direction * step)
     );
-
-    if (Math.abs(next - before) < 2) return false;
+    if (Math.abs(next - metrics.top) < 2) return false;
     scroller.scrollTop = next;
     return true;
   }
@@ -805,181 +857,166 @@
     const indices = entries.map((entry) => entry.index);
     const min = indices.length ? Math.min(...indices) : -1;
     const max = indices.length ? Math.max(...indices) : -1;
-    const top =
-      scroller === document.scrollingElement ||
-      scroller === document.documentElement ||
-      scroller === document.body
-        ? window.scrollY || document.documentElement.scrollTop || 0
-        : scroller
-          ? scroller.scrollTop
-          : 0;
-
-    return min + ":" + max + ":" + Math.round(top);
+    return min + ":" + max + ":" + Math.round(scroller ? scroller.scrollTop : 0);
   }
 
-  function navigationDirection(targetIndex, entries) {
+  function navigationDirection(targetIndex, entries, scroller) {
     if (entries.length) {
       const minIndex = entries[0].index;
       const maxIndex = entries[entries.length - 1].index;
-
       if (targetIndex < minIndex) return -1;
       if (targetIndex > maxIndex) return 1;
-
       let nearest = entries[0];
       for (const entry of entries) {
-        if (
-          Math.abs(entry.index - targetIndex) <
-          Math.abs(nearest.index - targetIndex)
-        ) {
-          nearest = entry;
-        }
+        if (Math.abs(entry.index - targetIndex) <
+            Math.abs(nearest.index - targetIndex)) nearest = entry;
       }
-
       if (targetIndex < nearest.index) return -1;
       if (targetIndex > nearest.index) return 1;
     }
-
-    const origin =
-      state.navigationOriginIndex >= 0
-        ? state.navigationOriginIndex
-        : state.selectedIndex;
-
-    return targetIndex < origin ? -1 : 1;
+    if (state.navigationOriginIndex >= 0) {
+      return targetIndex < state.navigationOriginIndex ? -1 : 1;
+    }
+    const metrics = scrollMetrics(scroller);
+    if (!metrics) return 0;
+    if (Math.abs(metrics.top - metrics.newest) <= 3) return -1;
+    if (Math.abs(metrics.top - metrics.oldest) <= 3) return 1;
+    return 0;
   }
 
   function settleNavigation(index, seq, round = 0) {
     if (seq !== state.navigationSeq) return;
-
-    const prompt = state.prompts[index];
-    const target = resolvePromptElement(prompt);
-
-    if (!target) {
-      runNavigation(index, seq, 0, 0, "");
+    if (location.pathname !== state.routeKey) {
+      finishNavigation(seq, false, "会话已切换");
       return;
     }
-
-    scrollElementIntoView(target);
-    updateStatusUi();
-    updateActiveItem();
-
+    const scroller = primaryScrollContainer();
+    const target = resolvePromptElement(state.prompts[index], scroller);
+    if (!target || !scrollElementIntoView(target, scroller)) {
+      state.navigationRecoveryAttempts += 1;
+      if (state.navigationRecoveryAttempts > 3) {
+        finishNavigation(seq, false, "目标锚点在定位期间失效");
+      } else {
+        runNavigation(index, seq);
+      }
+      return;
+    }
     if (round >= 2) {
-      finishNavigation(seq);
+      if (anchorIsInViewport(target, scroller)) {
+        finishNavigation(seq, true);
+      } else {
+        finishNavigation(seq, false, "目标没有进入活动聊天视口");
+      }
       return;
     }
-
-    scheduleNavigationStep(
-      seq,
-      () => settleNavigation(index, seq, round + 1),
-      120
-    );
+    scheduleNavigationStep(seq, () => settleNavigation(index, seq, round + 1), 120);
   }
 
-  function runNavigation(
-    index,
-    seq,
-    attempt = 0,
-    staleCount = 0,
-    previousSignature = ""
-  ) {
+  function runNavigation(index, seq, progress = {}) {
     if (seq !== state.navigationSeq) return;
     if (location.pathname !== state.routeKey) {
-      finishNavigation(seq);
+      finishNavigation(seq, false, "会话已切换");
       return;
     }
-
     const prompt = state.prompts[index];
     if (!prompt) {
-      finishNavigation(seq);
+      finishNavigation(seq, false, "提问目录已变更");
       return;
     }
-
-    const target = resolvePromptElement(prompt);
-    if (target) {
-      scrollElementIntoView(target);
-      scheduleNavigationStep(seq, () => settleNavigation(index, seq, 0), 100);
-      return;
-    }
-
-    if (attempt >= 80) {
-      finishNavigation(seq);
-      return;
-    }
-
-    const entries = currentMountedPromptEntries();
     const scroller = primaryScrollContainer();
-    const signature = mountedRangeSignature(entries, scroller);
-    const nextStaleCount =
-      signature === previousSignature ? staleCount + 1 : 0;
-
-    if (nextStaleCount >= 5) {
-      finishNavigation(seq);
+    if (!scroller) {
+      const waits = (progress.waits || 0) + 1;
+      if (waits > 12) {
+        finishNavigation(seq, false, "活动聊天滚动区域未就绪或存在歧义");
+      } else {
+        scheduleNavigationStep(
+          seq, () => runNavigation(index, seq, { ...progress, waits }), 160
+        );
+      }
       return;
     }
-
-    const direction = navigationDirection(index, entries);
+    const target = resolvePromptElement(prompt, scroller);
+    if (target && scrollElementIntoView(target, scroller)) {
+      scheduleNavigationStep(seq, () => settleNavigation(index, seq), 100);
+      return;
+    }
+    const attempt = progress.attempt || 0;
+    if (attempt >= 96) {
+      finishNavigation(seq, false, "已达到本次有限导航步数");
+      return;
+    }
+    const entries = currentMountedPromptEntries(scroller);
+    const signature = mountedRangeSignature(entries, scroller);
+    const stale = signature === progress.previousSignature
+      ? (progress.stale || 0) + 1 : 0;
+    if (stale >= 5) {
+      finishNavigation(seq, false, "滚动或锚点没有进展");
+      return;
+    }
+    const metrics = scrollMetrics(scroller);
+    const startBoundary = progress.startBoundary ||
+      (Math.abs(metrics.top - metrics.newest) <= 3 ? "newest" :
+        Math.abs(metrics.top - metrics.oldest) <= 3 ? "oldest" : "middle");
+    const inferred = navigationDirection(index, entries, scroller);
+    const direction = entries.length
+      ? inferred : (progress.direction || inferred || -1);
     const scale = attempt < 6 ? 0.82 : attempt < 20 ? 1.0 : 1.22;
     const moved = scrollOneViewport(scroller, direction, scale);
-
     updateStatusUi();
     updateActiveItem();
-
     if (!moved) {
-      finishNavigation(seq);
+      // Reverse once only for zero-anchor searches started in the middle.
+      if (!entries.length && startBoundary === "middle" && !progress.reversed &&
+          scrollOneViewport(scroller, -direction, scale)) {
+        scheduleNavigationStep(seq, () => runNavigation(index, seq, {
+          attempt: attempt + 1,
+          direction: -direction,
+          reversed: true,
+          startBoundary,
+          previousSignature: "",
+          stale: 0
+        }), 170);
+      } else {
+        finishNavigation(seq, false, "已达到滚动边界，目标尚不可定位");
+      }
       return;
     }
-
-    scheduleNavigationStep(
-      seq,
-      () =>
-        runNavigation(
-          index,
-          seq,
-          attempt + 1,
-          nextStaleCount,
-          signature
-        ),
-      170
-    );
+    scheduleNavigationStep(seq, () => runNavigation(index, seq, {
+      attempt: attempt + 1,
+      direction,
+      reversed: !!progress.reversed,
+      startBoundary,
+      previousSignature: signature,
+      stale
+    }), 170);
   }
 
   function jumpTo(index) {
     const prompt = state.prompts[index];
     if (!prompt) return;
-
     const origin = currentPromptIndex();
-
     cancelNavigation();
     state.selectedIndex = index;
     state.navigationTargetIndex = index;
     state.navigationOriginIndex = origin;
     state.navigationActive = true;
-
+    state.navigationFeedback = "寻找中";
+    state.navigationReason = "";
+    state.navigationRecoveryAttempts = 0;
+    state.navigationLocatedTop = null;
     const seq = state.navigationSeq;
+    updateStatusUi();
     updateActiveItem();
-
-    const target = resolvePromptElement(prompt);
-    if (target) {
-      scrollElementIntoView(target);
-      scheduleNavigationStep(seq, () => settleNavigation(index, seq, 0), 100);
-      return;
-    }
-
-    runNavigation(index, seq, 0, 0, "");
+    runNavigation(index, seq);
   }
 
   function currentPromptIndex() {
     if (!state.prompts.length) return -1;
-
     const scroller = primaryScrollContainer();
-    const scrollerRect =
-      scroller && scroller.getBoundingClientRect
-        ? scroller.getBoundingClientRect()
-        : { top: 0, height: window.innerHeight };
-
-    const readingY =
-      scrollerRect.top + Math.min(scrollerRect.height * 0.28, 320);
-
-    const mounted = currentMountedPromptEntries()
+    if (!scroller) return -1;
+    const view = scroller.getBoundingClientRect();
+    const readingY = view.top + Math.min(view.height * 0.28, 320);
+    const mounted = currentMountedPromptEntries(scroller)
       .map((entry) => {
         const rect = entry.element.getBoundingClientRect();
         return {
@@ -989,54 +1026,48 @@
           distance: Math.abs(rect.top - readingY)
         };
       })
-      .filter((item) => item.bottom >= scrollerRect.top - 2)
+      .filter((item) => item.bottom >= view.top - 2 && item.top <= view.bottom + 2)
       .sort((a, b) => a.top - b.top);
-
     if (mounted.length) {
       const above = mounted.filter((item) => item.top <= readingY);
       if (above.length) return above[above.length - 1].index;
-
       mounted.sort((a, b) => a.distance - b.distance);
       return mounted[0].index;
     }
-
-    if (state.selectedIndex >= 0 && state.selectedIndex < state.prompts.length) {
-      return state.selectedIndex;
-    }
-
-    return 0;
+    return -1; // Unknown position is not prompt #0.
   }
 
   function updateActiveItem() {
     const root = document.getElementById(ROOT_ID);
     if (!root || !state.prompts.length) return;
-
-    const active =
-      state.navigationActive && state.navigationTargetIndex >= 0
-        ? state.navigationTargetIndex
-        : currentPromptIndex();
-
+    const visibleIndex = currentPromptIndex();
+    const active = !state.navigationActive &&
+      state.navigationFeedback === "已定位" && state.selectedIndex >= 0
+      ? state.selectedIndex : visibleIndex;
     root.querySelectorAll(".cgpt-nav-item").forEach((button) => {
       button.classList.toggle(
-        "is-active",
-        Number(button.dataset.index) === active
+        "is-active", Number(button.dataset.index) === active
       );
     });
   }
 
   function jumpRelative(direction) {
     if (!state.prompts.length) return;
-
-    const current =
-      state.navigationActive && state.selectedIndex >= 0
-        ? state.selectedIndex
-        : currentPromptIndex();
-
-    const target =
-      direction < 0
-        ? Math.max(0, current - 1)
-        : Math.min(state.prompts.length - 1, current + 1);
-
+    let current = state.navigationActive && state.selectedIndex >= 0
+      ? state.selectedIndex : currentPromptIndex();
+    if (current < 0) {
+      const metrics = scrollMetrics(primaryScrollContainer());
+      if (metrics && Math.abs(metrics.top - metrics.newest) <= 3) {
+        current = state.prompts.length - 1;
+      } else if (metrics && Math.abs(metrics.top - metrics.oldest) <= 3) {
+        current = 0;
+      } else {
+        current = direction < 0 ? state.prompts.length : -1;
+      }
+    }
+    const target = direction < 0
+      ? Math.max(0, current - 1)
+      : Math.min(state.prompts.length - 1, current + 1);
     jumpTo(target);
   }
 
@@ -1044,7 +1075,6 @@
     if (!event.altKey || event.ctrlKey || event.metaKey || event.isComposing) {
       return;
     }
-
     // Only Alt+Q (physical Q key) toggles the sidebar; ignore Shift and key repeats.
     if (event.code === "KeyQ") {
       if (event.shiftKey || event.repeat) return;
@@ -1053,9 +1083,7 @@
       event.stopPropagation();
       return;
     }
-
     let handled = true;
-
     switch (event.key) {
       case "ArrowUp":
         jumpRelative(-1);
@@ -1072,7 +1100,6 @@
       default:
         handled = false;
     }
-
     if (handled) {
       event.preventDefault();
       event.stopPropagation();
@@ -1091,6 +1118,10 @@
     state.prompts = [];
     state.fingerprint = "";
     state.selectedIndex = -1;
+    state.navigationFeedback = "";
+    state.navigationReason = "";
+    state.navigationRecoveryAttempts = 0;
+    state.navigationLocatedTop = null;
     state.apiStatus = "读取中…";
     state.apiStatusTitle = "正在切换聊天并重建目录。";
 
@@ -1123,7 +1154,8 @@
       const target = event.target;
       if (root && target && (target === root || root.contains(target))) return;
 
-      cancelNavigation();
+      cancelNavigation("用户手动操作了聊天区域");
+      updateStatusUi();
       updateActiveItem();
     };
 
@@ -1143,6 +1175,16 @@
         if (state.scrollTicking) return;
         state.scrollTicking = true;
         requestAnimationFrame(() => {
+          if (!state.navigationActive && state.navigationFeedback === "已定位") {
+            const activeScroller = primaryScrollContainer();
+            if (!activeScroller || state.navigationLocatedTop === null ||
+                Math.abs(activeScroller.scrollTop - state.navigationLocatedTop) > 2) {
+              state.navigationFeedback = "";
+              state.selectedIndex = -1;
+              state.navigationLocatedTop = null;
+              updateStatusUi();
+            }
+          }
           updateActiveItem();
           state.scrollTicking = false;
         });
