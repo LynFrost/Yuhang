@@ -8,7 +8,7 @@
 
 为长 ChatGPT 对话提供“我的提问”目录和快速跳转能力的本地 Chrome / Edge 扩展。
 
-- **当前版本：** 1.4.0
+- **当前版本：** 1.4.1
 - **技术栈：** Chrome Extension Manifest V3、JavaScript、CSS
 - **支持页面：** `chatgpt.com`、`chat.openai.com`
 - **核心能力：**
@@ -27,6 +27,7 @@
 | `Alt + ↓` | 下一条我的提问 |
 | `Alt + Home` | 第一条我的提问 |
 | `Alt + End` | 最后一条我的提问 |
+| `Alt + \` | 收起/展开侧边导航栏 |
 
 **安装**
 
@@ -47,6 +48,8 @@ ChatGPT Prompt Navigator 不包含遥测、第三方请求或远程脚本。为�
 ```text
 Yuhang/
 ├── README.md
+├── docs/
+│   └── v1.4.1-sidebar-toggle-hotkey.md
 └── chatgpt-prompt-navigator/
     ├── README.md
     ├── manifest.json
