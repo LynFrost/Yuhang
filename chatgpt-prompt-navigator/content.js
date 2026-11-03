@@ -598,6 +598,12 @@
     root.classList.toggle("cgpt-theme-light", !dark);
   }
 
+  function toggleSidebar() {
+    const root = ensureUi();
+    state.collapsed = !state.collapsed;
+    root.classList.toggle("is-collapsed", state.collapsed);
+  }
+
   function ensureUi() {
     let root = document.getElementById(ROOT_ID);
     if (root) return root;
@@ -605,7 +611,7 @@
     root = document.createElement("aside");
     root.id = ROOT_ID;
     root.innerHTML = `
-      <button class="cgpt-nav-toggle" type="button" title="收起/展开提问导航" aria-label="收起或展开提问导航">›</button>
+      <button class="cgpt-nav-toggle" type="button" title="收起/展开提问导航 (Alt+\\)" aria-label="收起或展开提问导航">›</button>
       <div class="cgpt-nav-panel">
         <div class="cgpt-nav-header">
           <div class="cgpt-nav-title">
@@ -625,7 +631,7 @@
           spellcheck="false"
         />
         <div class="cgpt-nav-list"></div>
-        <div class="cgpt-nav-footer">Alt+↑/↓ 上下提问 · Alt+Home/End 首问/末问</div>
+        <div class="cgpt-nav-footer">Alt+↑/↓ 上下提问 · Alt+Home/End 首问/末问 · Alt+\\ 收起/展开</div>
       </div>
     `;
 
@@ -633,10 +639,7 @@
 
     syncTheme();
 
-    root.querySelector(".cgpt-nav-toggle").addEventListener("click", () => {
-      state.collapsed = !state.collapsed;
-      root.classList.toggle("is-collapsed", state.collapsed);
-    });
+    root.querySelector(".cgpt-nav-toggle").addEventListener("click", toggleSidebar);
 
     root.querySelector(".cgpt-nav-search").addEventListener("input", renderList);
 
@@ -1045,6 +1048,9 @@
     let handled = true;
 
     switch (event.key) {
+      case "\\":
+        toggleSidebar();
+        break;
       case "ArrowUp":
         jumpRelative(-1);
         break;
