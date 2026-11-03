@@ -611,7 +611,7 @@
     root = document.createElement("aside");
     root.id = ROOT_ID;
     root.innerHTML = `
-      <button class="cgpt-nav-toggle" type="button" title="收起/展开提问导航 (Alt+\\)" aria-label="收起或展开提问导航">›</button>
+      <button class="cgpt-nav-toggle" type="button" title="收起/展开提问导航 (Alt+X)" aria-label="收起或展开提问导航">›</button>
       <div class="cgpt-nav-panel">
         <div class="cgpt-nav-header">
           <div class="cgpt-nav-title">
@@ -631,7 +631,7 @@
           spellcheck="false"
         />
         <div class="cgpt-nav-list"></div>
-        <div class="cgpt-nav-footer">Alt+↑/↓ 上下提问 · Alt+Home/End 首问/末问 · Alt+\\ 收起/展开</div>
+        <div class="cgpt-nav-footer">Alt+↑/↓ 上下提问 · Alt+Home/End 首问/末问 · Alt+X 收起/展开</div>
       </div>
     `;
 
@@ -1045,12 +1045,18 @@
       return;
     }
 
+    // Only Alt+X (physical X key) toggles the sidebar; ignore Shift and key repeats.
+    if (event.code === "KeyX") {
+      if (event.shiftKey || event.repeat) return;
+      toggleSidebar();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     let handled = true;
 
     switch (event.key) {
-      case "\\":
-        toggleSidebar();
-        break;
       case "ArrowUp":
         jumpRelative(-1);
         break;
